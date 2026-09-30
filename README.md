@@ -6,6 +6,8 @@ A major life event rarely appears as a single transaction. Moving house, having 
 
 Today, these signals are largely handled independently by individual products and services. We envision a shared **Life Moments layer** that brings these signals together, identifies meaningful changes in a customer's situation, and gives KBC's ecosystem the context to respond.
 
+(Run the application locally by running `npm run dev` or `npm run start`)
+
 ## Why Life Moments?
 
 KBC already has a unique view of its customers' financial lives: transactions, accounts, insurance, loans, investments and interactions with KBC services.
