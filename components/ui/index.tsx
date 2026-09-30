@@ -7,8 +7,10 @@ import { formatEUR } from "@/lib/client/format";
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 export function Card({ children, className, ...rest }: ComponentProps<"div">) {
+  // Tailwind can't guarantee which of two bg-* classes wins, so a caller's background replaces the default.
+  const customBg = className?.split(/\s+/).some((c) => c.startsWith("bg-"));
   return (
-    <div className={cx("rounded-2xl bg-surface p-4 shadow-[0_1px_3px_rgba(16,24,40,0.06)] ring-1 ring-line", className)} {...rest}>
+    <div className={cx("rounded-2xl p-4 shadow-[0_1px_3px_rgba(16,24,40,0.06)] ring-1 ring-line", !customBg && "bg-surface", className)} {...rest}>
       {children}
     </div>
   );

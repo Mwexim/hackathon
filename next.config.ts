@@ -13,6 +13,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  devIndicators: false, // no Next.js badge in the demo recording
   outputFileTracingRoot: process.cwd(),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
