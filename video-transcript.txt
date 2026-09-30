@@ -1,0 +1,97 @@
+KBC LIFE MOMENTS — VIDEO TRANSCRIPT (3:00)
+==========================================
+
+Before recording:
+- Press "Reset demo" on the employee page.
+- Use separate browser windows for Sarah, Thomas and the KBC employee.
+
+
+[0:00–0:08] SLIDE 1 — COVER
+
+A major life event rarely happens in one transaction.
+This is KBC Life Moments: from financial signals to meaningful moments of help.
+
+
+[0:08–0:25] SLIDE 2 — A LIFE EVENT IS NEVER ONE TRANSACTION
+
+Moving house leaves small signals behind.
+The old rent stops. A new one starts. A first bill arrives from a new energy provider.
+A question to Kate: "How do I change my address?"
+Alone, none of these proves anything. Together, they tell a story.
+
+
+[0:25–0:45] SLIDE 3 — ONE SHARED LAYER
+
+Life Moments is a shared layer that connects these signals and tries to understand
+what might be changing in a customer's life.
+It doesn't decide what to sell. Once a customer confirms a moment, every KBC service
+decides for itself how it can help: insurance, savings, home and mortgage,
+financial planning. Customers no longer have to figure out which product they need.
+
+
+[0:45–1:00] SLIDE 4 — KBC NEVER ASSUMES
+
+This only works if customers stay in control. So there's one principle: KBC never assumes.
+We observe. We suggest a simple question. We explain why we asked.
+The customer confirms, dismisses, or simply ignores it.
+Only then do we help: first by protecting what they already have.
+Health payments are never used.
+
+
+[1:00–1:15] SLIDE 5 — BUILT FOR 2.3 MILLION CUSTOMERS
+
+Every customer is scored on their own with a light, explainable model,
+so it simply runs in parallel.
+And it gets smarter as it grows: every yes or no is feedback on the signals behind it.
+The more customers answer, the sharper each signal becomes,
+and the fewer, better questions we ask.
+
+
+[1:15–1:20] SLIDE 6 — LET'S MEET SARAH
+
+Let's meet Sarah. She just had a baby.
+
+
+[1:20–2:15] SCREEN RECORDING — SARAH
+
+(Dashboard -> "Something may have changed" card -> notification)
+KBC noticed something, but it doesn't assume. So it asks: has your family grown?
+
+(Open "Why am I seeing this?")
+Sarah can see exactly why: child benefit started, a new childcare payment,
+and her family insurance still covers only two people.
+Her hospital bill is never used.
+
+(Tap "Yes, that's right")
+She confirms. It's now a confirmed life moment: a new baby.
+
+(Suggestions -> "Add your child to your family insurance" -> 2 -> 3 -> Confirm change)
+The first thing KBC does is protect what she already has.
+Her child is added to her family insurance: one tap, done.
+
+(Back to suggestions)
+Only then an offer, and just one, because Sarah chose light suggestions.
+
+
+[2:15–2:27] SCREEN RECORDING — THOMAS
+
+(Thomas confirms "Are you travelling more often?")
+Thomas travels a lot. He confirms, and KBC tells him he's already covered
+by his credit card. No sale.
+Sometimes the best help is: you don't need anything.
+
+
+[2:27–2:45] SCREEN RECORDING — KBC EMPLOYEE VIEW
+
+(Dashboard -> move the threshold slider -> open "Explain the math")
+On KBC's side, the same engine scans thousands of customers in a fraction of a second.
+KBC decides how sure the system must be before it asks,
+and can see the reasoning behind every single question.
+
+
+[2:45–3:00] BACK TO SLIDE 1 — COVER
+
+Banking shouldn't start with "Which product are you looking for?"
+It should start with a much simpler question:
+what has changed in your life, and how can we help?
+KBC Life Moments.
