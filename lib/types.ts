@@ -126,6 +126,51 @@ export type RecommendationGroup = {
   eventId: string;
   eventType: LifeEventType;
   recommendations: Recommendation[]; // service first, then commercial
+  completedActionIds: string[]; // recommendation ids already completed via /api/me/actions
+};
+
+/** POST /api/me/actions/:recommendationId */
+export type ActionResult = { status: "done"; recommendationId: string };
+
+/** PATCH /api/me/consent */
+export type ConsentUpdate = {
+  marketing?: ConsentLevel;
+  proactivityLevel?: Customer["consent"]["proactivityLevel"];
+};
+
+/** GET /api/employee/overview (employee only). */
+export type EmployeeOverview = {
+  totalCustomers: number;
+  runtimeMs: number;
+  threshold: number;
+  perEvent: { type: LifeEventType; detected: number; planted: number; precision: number; recall: number }[];
+  thresholdCurve: { threshold: number; precision: number; recall: number }[];
+  confidenceHistogram: { bucket: string; count: number }[];
+  consentMix: Record<ConsentLevel, number>;
+  actionsByKind: { service: number; commercial: number };
+};
+
+/** GET /api/debug/events?customer=... (employee only, dev only): "Explain the math". */
+export type MathSignal = {
+  signal: string;
+  group: string;
+  likelihoodRatio: number;
+  description: string;
+  counted: boolean; // false when a stronger signal in the same group was used
+};
+
+export type MathExplanation = {
+  customerId: string;
+  customerName: string;
+  events: {
+    type: LifeEventType;
+    prior: number;
+    priorOdds: number;
+    signals: MathSignal[];
+    odds: number;
+    confidence: number;
+    tier: QuestionTier;
+  }[];
 };
 
 /** Question tier derived from confidence (see lib/detection/config.ts). */

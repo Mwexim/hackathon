@@ -1,12 +1,12 @@
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { DebugView } from "./DebugView";
+import { EmployeeDashboard } from "./EmployeeDashboard";
 
-/** KBC employee detection debug view. Dev only; employee session required. */
+/** KBC-side dashboard. Employee session required (checked server-side). */
 export default async function EmployeePage() {
-  if (process.env.NODE_ENV === "production") notFound();
   const s = await getSession();
   if (!s) redirect("/login");
   if (s.role !== "employee") redirect("/dashboard");
-  return <DebugView />;
+  // Debug tools (explain-the-math, demo reset) are never available in production.
+  return <EmployeeDashboard devTools={process.env.NODE_ENV !== "production"} />;
 }

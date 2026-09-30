@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const securityHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+  },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -9,6 +13,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  outputFileTracingRoot: process.cwd(),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

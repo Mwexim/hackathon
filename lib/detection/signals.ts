@@ -1,18 +1,21 @@
 // Signal extraction. Pure functions: data in, present signals out.
-// Transactions passed in here MUST already be run through filterSensitive().
+// extractSignals() ALWAYS runs sensitiveFilter first, so no signal function ever
+// sees health-related transactions.
 
 import type {
   AppBehaviour,
   Customer,
   InsurancePolicy,
   LifeEventType,
+  MerchantCategory,
   Transaction,
 } from "@/lib/types";
 import { LOOKBACK_DAYS, SIGNAL_PARAMS } from "./config";
+import { filterSensitive } from "./sensitiveFilter";
 
 export type DetectionInput = {
   customer: Customer;
-  transactions: Transaction[]; // sensitive categories already removed
+  transactions: Transaction[];
   policies: InsurancePolicy[];
   behaviour: AppBehaviour[];
   today: string; // YYYY-MM-DD
@@ -24,176 +27,257 @@ export type PresentSignal = {
   description: string; // plain language, shown to the customer
 };
 
+// ---------------------------------------------------------------------------
+// Date helpers
+// ---------------------------------------------------------------------------
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const toMs = (date: string) => Date.parse(date.slice(0, 10) + "T00:00:00Z");
-const daysAgo = (today: string, date: string) => Math.round((toMs(today) - toMs(date)) / DAY_MS);
-const inWindow = (today: string, date: string) => {
+export const daysAgo = (today: string, date: string) => Math.round((toMs(today) - toMs(date)) / DAY_MS);
+export const inWindow = (today: string, date: string) => {
   const age = daysAgo(today, date);
   return age >= 0 && age < LOOKBACK_DAYS;
 };
+const monthName = (date: string) =>
+  new Date(toMs(date)).toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
 
-/** 30-day bucket index counted back from today (0 = last 30 days), or -1 outside the window. */
+/** 30-day bucket counted back from today (0 = last 30 days), or -1 outside the window. */
 const bucketOf = (today: string, date: string) =>
   inWindow(today, date) ? Math.floor(daysAgo(today, date) / 30) : -1;
+const BUCKETS = Math.ceil(LOOKBACK_DAYS / 30);
 
-/** First date each counterparty appears (within the given list). */
-function firstSeen(txs: Transaction[]): Map<string, string> {
-  const seen = new Map<string, string>();
+const hasHistoryBeforeWindow = (txs: Transaction[], today: string) =>
+  txs.some((t) => daysAgo(today, t.date) >= LOOKBACK_DAYS);
+
+// ---------------------------------------------------------------------------
+// Generic, testable signal functions
+// ---------------------------------------------------------------------------
+
+export type RecurringSeries = {
+  counterpartyId: string;
+  category: MerchantCategory;
+  direction: "in" | "out";
+  firstDate: string;
+  lastDate: string;
+  count: number;
+  medianAmount: number;
+};
+
+/** Same counterparty, roughly monthly, similar amount (at least 2 payments). */
+export function detectRecurringPayments(txs: Transaction[]): RecurringSeries[] {
+  const byCp = new Map<string, Transaction[]>();
   for (const t of txs) {
-    const prev = seen.get(t.counterpartyId);
-    if (!prev || t.date < prev) seen.set(t.counterpartyId, t.date);
+    const key = `${t.counterpartyId}|${t.direction}`;
+    byCp.set(key, [...(byCp.get(key) ?? []), t]);
   }
-  return seen;
+  const series: RecurringSeries[] = [];
+  for (const list of byCp.values()) {
+    if (list.length < 2) continue;
+    const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
+    const amounts = sorted.map((t) => t.amount).sort((a, b) => a - b);
+    const median = amounts[Math.floor(amounts.length / 2)];
+    const similar = sorted.every(
+      (t) => Math.abs(t.amount - median) <= median * SIGNAL_PARAMS.recurringAmountTolerance,
+    );
+    const monthly = sorted.slice(1).every((t, i) => {
+      const gap = daysAgo(t.date, sorted[i].date);
+      return gap >= SIGNAL_PARAMS.recurringMinDays && gap <= SIGNAL_PARAMS.recurringMaxDays;
+    });
+    if (!similar || !monthly) continue;
+    series.push({
+      counterpartyId: sorted[0].counterpartyId,
+      category: sorted[0].merchantCategory,
+      direction: sorted[0].direction,
+      firstDate: sorted[0].date,
+      lastDate: sorted[sorted.length - 1].date,
+      count: sorted.length,
+      medianAmount: median,
+    });
+  }
+  return series;
 }
 
-function hasHistoryBeforeWindow(input: DetectionInput): boolean {
-  return input.transactions.some((t) => daysAgo(input.today, t.date) >= LOOKBACK_DAYS);
-}
-
-// ---------------------------------------------------------------------------
-// moved_house
-// ---------------------------------------------------------------------------
-
-function movedHouse(input: DetectionInput): PresentSignal[] {
-  const { customer, transactions: txs, policies, behaviour, today } = input;
-  const out: PresentSignal[] = [];
-  const add = (signal: string, description: string) =>
-    out.push({ eventType: "moved_house", signal, description });
-
-  const home = policies.find((p) => p.type === "home" && p.insuredAddress);
-  if (home && normalise(home.insuredAddress!) !== normalise(customer.address)) {
-    add("insured_address_outdated", "The address on your home insurance differs from the address we have for you");
-  }
-
-  const rent = txs.filter((t) => t.merchantCategory === "rent" && t.direction === "out");
-  const rentFirst = firstSeen(rent);
-  const history = hasHistoryBeforeWindow(input);
-  const newRentCps = [...rentFirst].filter(([, first]) => inWindow(today, first)).map(([cp]) => cp);
-  const olderRentExists = [...rentFirst].some(([cp]) => !newRentCps.includes(cp));
-  const newRecurringRent = newRentCps.some(
-    (cp) => rent.filter((t) => t.counterpartyId === cp && t.recurring).length >= 2,
+/** A recurring series in this category that started inside the window (and we have older history). */
+export function detectNewRecurring(
+  txs: Transaction[],
+  today: string,
+  category: MerchantCategory,
+  direction: "in" | "out" = "out",
+): RecurringSeries | null {
+  if (!hasHistoryBeforeWindow(txs, today)) return null;
+  return (
+    detectRecurringPayments(txs).find(
+      (s) => s.category === category && s.direction === direction && inWindow(today, s.firstDate),
+    ) ?? null
   );
-  if (history && olderRentExists && newRecurringRent) {
-    add("new_rent", "A new monthly rent payment started");
+}
+
+/** A recurring series in this category whose last payment is more than `stoppedAfterDays` ago. */
+export function detectStoppedRecurring(
+  txs: Transaction[],
+  today: string,
+  category: MerchantCategory,
+): RecurringSeries | null {
+  return (
+    detectRecurringPayments(txs).find(
+      (s) =>
+        s.category === category &&
+        s.direction === "out" &&
+        daysAgo(today, s.lastDate) > SIGNAL_PARAMS.stoppedAfterDays,
+    ) ?? null
+  );
+}
+
+/** First payment (inside the window) to a counterparty in this category we have never seen before. */
+export function detectFirstPaymentInCategory(
+  txs: Transaction[],
+  today: string,
+  category: MerchantCategory,
+  direction: "in" | "out" = "out",
+): Transaction | null {
+  const relevant = txs
+    .filter((t) => t.merchantCategory === category && t.direction === direction)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const seenBefore = new Set(relevant.filter((t) => !inWindow(today, t.date)).map((t) => t.counterpartyId));
+  const needsHistory = category === "utilities"; // a "new" provider only means something with history
+  if (needsHistory && !hasHistoryBeforeWindow(txs, today)) return null;
+  return relevant.find((t) => inWindow(today, t.date) && !seenBefore.has(t.counterpartyId)) ?? null;
+}
+
+/** Sum and count per 30-day bucket for one category (index 0 = last 30 days). */
+export function detectMonthlySpend(
+  txs: Transaction[],
+  today: string,
+  category: MerchantCategory,
+): { sum: number; count: number }[] {
+  const buckets = Array.from({ length: BUCKETS }, () => ({ sum: 0, count: 0 }));
+  for (const t of txs) {
+    if (t.merchantCategory !== category || t.direction !== "out") continue;
+    const b = bucketOf(today, t.date);
+    if (b < 0) continue;
+    buckets[b].sum += t.amount;
+    buckets[b].count += 1;
   }
+  return buckets;
+}
 
-  const stoppedRent = [...rentFirst.keys()].some((cp) => {
-    const payments = rent.filter((t) => t.counterpartyId === cp && t.recurring);
-    if (payments.length < 2) return false;
-    const last = payments.reduce((a, b) => (a.date > b.date ? a : b));
-    return daysAgo(today, last.date) > SIGNAL_PARAMS.oldRentStoppedAfterDays;
-  });
-  if (stoppedRent) add("old_rent_stopped", "Your previous monthly rent payment stopped");
+/** Card payments abroad inside the window. */
+export function detectForeignPayments(txs: Transaction[], today: string): Transaction[] {
+  return txs.filter((t) => t.foreign && t.direction === "out" && inWindow(today, t.date));
+}
 
-  const utilFirst = firstSeen(txs.filter((t) => t.merchantCategory === "utilities" && t.direction === "out"));
-  if (history && [...utilFirst.values()].some((first) => inWindow(today, first))) {
-    add("new_utility_provider", "A first payment to a new energy or utility provider");
-  }
-
-  if (txs.some((t) => t.merchantCategory === "moving" && inWindow(today, t.date))) {
-    add("moving_company", "A payment to a moving company");
-  }
-
-  if (
-    behaviour.some(
+/** A Kate question or search inside the window matching the pattern. */
+export function detectAppIntent(
+  behaviour: AppBehaviour[],
+  today: string,
+  pattern: RegExp = SIGNAL_PARAMS.addressIntentPattern,
+): AppBehaviour | null {
+  return (
+    behaviour.find(
       (b) =>
         (b.type === "kate_question" || b.type === "search") &&
         inWindow(today, b.timestamp) &&
-        SIGNAL_PARAMS.addressIntentPattern.test(b.value),
-    )
-  ) {
-    add("address_intent", "You asked in the app how to change your address");
-  }
-
-  if (
-    txs.some(
-      (t) =>
-        t.merchantCategory === "furniture" &&
-        t.direction === "out" &&
-        t.amount >= SIGNAL_PARAMS.largeFurnitureMinAmount &&
-        inWindow(today, t.date),
-    )
-  ) {
-    add("large_furniture", "A larger furniture purchase");
-  }
-
-  return out;
+        pattern.test(b.value),
+    ) ?? null
+  );
 }
 
 const normalise = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-// ---------------------------------------------------------------------------
-// new_baby
-// ---------------------------------------------------------------------------
+/** customer.address differs from the home policy's insuredAddress. */
+export function detectInsuredAddressOutdated(customer: Customer, policies: InsurancePolicy[]): boolean {
+  const home = policies.find((p) => p.type === "home" && p.insuredAddress);
+  return !!home && normalise(home.insuredAddress!) !== normalise(customer.address);
+}
 
-function newBaby(input: DetectionInput): PresentSignal[] {
-  const { customer, transactions: txs, policies, today } = input;
-  const out: PresentSignal[] = [];
-  const add = (signal: string, description: string) =>
-    out.push({ eventType: "new_baby", signal, description });
-
-  const childcare = txs.filter((t) => t.merchantCategory === "childcare" && t.direction === "out");
-  const childcareFirst = firstSeen(childcare);
-  const newChildcare = [...childcareFirst].some(
-    ([cp, first]) =>
-      inWindow(today, first) && childcare.filter((t) => t.counterpartyId === cp && t.recurring).length >= 2,
-  );
-  if (newChildcare) add("new_childcare_payment", "A new monthly childcare payment started");
-
-  const benefit = txs.some(
-    (t) => t.merchantCategory === "child_benefit" && t.direction === "in" && inWindow(today, t.date),
-  );
-  if (benefit) add("child_benefit_income", "You started receiving child benefit");
-
-  const perBucket = [0, 0, 0];
-  for (const t of txs) {
-    if (t.merchantCategory !== "baby" || t.direction !== "out") continue;
-    const b = bucketOf(today, t.date);
-    if (b >= 0 && b < perBucket.length) perBucket[b] += t.amount;
-  }
-  const monthsOver = perBucket.filter((sum) => sum >= SIGNAL_PARAMS.babySpendingPerMonth).length;
-  if (monthsOver >= SIGNAL_PARAMS.babySpendingMinMonths) {
-    add("baby_spending_150", "Regular spending at baby stores in recent months");
-  }
-
-  // Household mismatch: the family policy covers the registered household size,
-  // but child-related payments suggest the household may have grown.
+/** family_liability covers fewer people than the household implied by the signals. */
+export function detectHouseholdMismatch(
+  customer: Customer,
+  policies: InsurancePolicy[],
+  childSignalsPresent: boolean,
+): InsurancePolicy | null {
   const family = policies.find((p) => p.type === "family_liability");
-  if (family && (newChildcare || benefit)) {
-    const registered = { single: 1, couple: 2, family: 3 }[customer.householdType];
-    if (family.coveredHouseholdMembers < registered + 1) {
-      add("household_mismatch", "Your family insurance may not cover everyone in your household");
-    }
+  if (!family) return null;
+  const registered = { single: 1, couple: 2, family: 3 }[customer.householdType];
+  const implied = registered + (childSignalsPresent ? 1 : 0);
+  return family.coveredHouseholdMembers < implied ? family : null;
+}
+
+// ---------------------------------------------------------------------------
+// Per life event
+// ---------------------------------------------------------------------------
+
+function movedHouse({ customer, transactions: txs, policies, behaviour, today }: DetectionInput): PresentSignal[] {
+  const out: PresentSignal[] = [];
+  const add = (signal: string, description: string) => out.push({ eventType: "moved_house", signal, description });
+
+  if (detectInsuredAddressOutdated(customer, policies)) {
+    add("insured_address_outdated", "The address on your home insurance differs from the address we have for you");
   }
+  const newRent = detectNewRecurring(txs, today, "rent");
+  if (newRent) add("new_rent", `A new monthly rent payment started in ${monthName(newRent.firstDate)}`);
+
+  const stoppedRent = detectStoppedRecurring(txs, today, "rent");
+  if (stoppedRent) add("old_rent_stopped", `Your previous monthly rent payment stopped after ${monthName(stoppedRent.lastDate)}`);
+
+  const utility = detectFirstPaymentInCategory(txs, today, "utilities");
+  if (utility) add("new_utility_provider", `A first payment to a new energy provider in ${monthName(utility.date)}`);
+
+  const mover = detectFirstPaymentInCategory(txs, today, "moving");
+  if (mover) add("moving_company", `A payment to a moving company in ${monthName(mover.date)}`);
+
+  if (detectAppIntent(behaviour, today)) add("address_intent", "You asked in the app how to change your address");
+
+  const furniture = txs.find(
+    (t) =>
+      t.merchantCategory === "furniture" &&
+      t.direction === "out" &&
+      t.amount >= SIGNAL_PARAMS.largeFurnitureMinAmount &&
+      inWindow(today, t.date),
+  );
+  if (furniture) add("large_furniture", `A larger furniture purchase in ${monthName(furniture.date)}`);
 
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// frequent_traveller
-// ---------------------------------------------------------------------------
-
-function frequentTraveller(input: DetectionInput): PresentSignal[] {
-  const { transactions: txs, today } = input;
+function newBaby({ customer, transactions: txs, policies, today }: DetectionInput): PresentSignal[] {
   const out: PresentSignal[] = [];
-  const add = (signal: string, description: string) =>
-    out.push({ eventType: "frequent_traveller", signal, description });
+  const add = (signal: string, description: string) => out.push({ eventType: "new_baby", signal, description });
 
-  const perBucket = [0, 0, 0];
-  for (const t of txs) {
-    if (t.merchantCategory !== "travel" || t.direction !== "out") continue;
-    const b = bucketOf(today, t.date);
-    if (b >= 0 && b < perBucket.length) perBucket[b] += 1;
+  const childcare = detectNewRecurring(txs, today, "childcare");
+  if (childcare) add("new_childcare_payment", `A new monthly payment to a childcare provider started in ${monthName(childcare.firstDate)}`);
+
+  const benefit = detectFirstPaymentInCategory(txs, today, "child_benefit", "in");
+  if (benefit) add("child_benefit_income", `You started receiving child benefit in ${monthName(benefit.date)}`);
+
+  const monthsOver = detectMonthlySpend(txs, today, "baby").filter(
+    (b) => b.sum >= SIGNAL_PARAMS.babySpendingPerMonth,
+  ).length;
+  if (monthsOver >= SIGNAL_PARAMS.babySpendingMinMonths) {
+    add("baby_spending_150", "Regular spending at baby stores over the last few months");
   }
-  const busyMonths = perBucket.filter((n) => n >= SIGNAL_PARAMS.travelPerMonth).length;
-  if (busyMonths >= 1) add("travel_3_per_month", "Several travel bookings within a single month");
+
+  const mismatch = detectHouseholdMismatch(customer, policies, !!childcare || !!benefit);
+  if (mismatch) {
+    add("household_mismatch", `Your family insurance covers ${mismatch.coveredHouseholdMembers} people, which may no longer be everyone at home`);
+  }
+  return out;
+}
+
+function frequentTraveller({ transactions: txs, today }: DetectionInput): PresentSignal[] {
+  const out: PresentSignal[] = [];
+  const add = (signal: string, description: string) => out.push({ eventType: "frequent_traveller", signal, description });
+
+  const busyMonths = detectMonthlySpend(txs, today, "travel").filter(
+    (b) => b.count >= SIGNAL_PARAMS.travelPerMonth,
+  ).length;
+  if (busyMonths >= 1) add("travel_3_per_month", "Three or more travel bookings within a single month");
   if (busyMonths >= SIGNAL_PARAMS.travelRepeatedMonths) {
-    add("repeated_2_months", "Frequent travel bookings in more than one month");
+    add("repeated_2_months", `Frequent travel bookings in ${busyMonths} of the last 3 months`);
   }
-
-  const foreign = txs.filter((t) => t.foreign && t.direction === "out" && inWindow(today, t.date)).length;
-  if (foreign >= SIGNAL_PARAMS.foreignPaymentsMin) add("foreign_card_payments", "Several card payments abroad");
-
+  if (detectForeignPayments(txs, today).length >= SIGNAL_PARAMS.foreignPaymentsMin) {
+    add("foreign_card_payments", "Several card payments abroad");
+  }
   return out;
 }
 
@@ -205,6 +289,8 @@ export const SIGNAL_EXTRACTORS: Record<LifeEventType, (input: DetectionInput) =>
   frequent_traveller: frequentTraveller,
 };
 
+/** Runs the sensitive filter, then every extractor. */
 export function extractSignals(input: DetectionInput): PresentSignal[] {
-  return Object.values(SIGNAL_EXTRACTORS).flatMap((fn) => fn(input));
+  const safe: DetectionInput = { ...input, transactions: filterSensitive(input.transactions) };
+  return Object.values(SIGNAL_EXTRACTORS).flatMap((fn) => fn(safe));
 }

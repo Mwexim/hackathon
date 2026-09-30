@@ -1,110 +1,161 @@
-# KBC Life Moments — proof of concept
+# Life Moments — KBC challenge, Tectonic Hackathon
 
-Built for the KBC challenge at the Tectonic Hackathon. A KBC-inspired mobile banking app with a
-**life-moment engine** behind it:
+## What it is
+
+A KBC-inspired mobile banking prototype with a **life-moment engine** behind it. It notices when
+something may have changed in a customer's life (a move, a new baby, travelling more), **asks** the
+customer instead of assuming, explains why it asks, and — once confirmed — first helps protect the
+contracts the customer already has, before offering anything new, and only if the customer agreed to that.
+
+## The idea
+
+**Detect → ask → explain → protect first → offer only with consent.**
+
+- The system detects a *possibility*, never a fact. Every notification is a question
+  ("Have you recently moved?"), never a statement.
+- "Why am I seeing this?" shows the evidence in plain language.
+- Nothing changes until the customer confirms. Dismissing is one tap and final.
+- After confirmation, **service actions** that fix an existing contract come first
+  (update the insured address, add a child to the family insurance, "you're already covered").
+- **Commercial offers** only appear when the customer's consent allows it.
+- The system is also allowed to say *"you don't need anything"* (Thomas).
+
+## How it works
 
 ```
-customer data → signals → explainable probability → consent-aware question → confirm / dismiss → relevant actions
+transactions, policies, app behaviour (last 90 days)
+        │
+        ▼
+ sensitive filter ── hospital / pharmacy payments removed, never used as evidence
+        │
+        ▼
+ signals ── new recurring rent, first payment to a new energy provider, child benefit,
+        │   3+ travel bookings per month, address outdated on home insurance, …
+        ▼
+ likelihood-ratio scoring ── odds = prior/(1-prior) × Π LR (strongest signal per group)
+        │                    confidence = odds / (1 + odds)
+        ▼
+ threshold ── ≥ 0.85 direct question · 0.50–0.85 softer question · < 0.50 nothing
+        │     (+ customer's proactivity level and muted topics)
+        ▼
+ question to the customer ── confirm / dismiss
+        │
+        ▼
+ service actions (protect existing contracts) ── one tap, really updates the contract
+        │
+        ▼
+ consent-filtered offers ── none: none · basic: max 1 · tailored: all
 ```
 
-The system detects a **possibility**, never a fact. It asks ("Have you recently moved?"), it never
-assumes. After the customer confirms, actions that **protect an existing contract** come first
-(e.g. "Update the address on your home insurance"); commercial offers only appear if the customer
-consented to them.
+Everything is offline and explainable: no ML, no LLM. All priors, likelihood ratios, groups and
+thresholds live in [`lib/detection/config.ts`](lib/detection/config.ts), each with a one-line
+rationale (team estimates).
 
-All data is synthetic. Counterparties are pseudonymised IDs.
-
-## Run it
+## How to run
 
 ```bash
 npm install
-cp .env.example .env.local   # optional in development
+cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. State is in memory and resets when the server restarts.
+Open http://localhost:3000. Tests: `npm test`. State is in memory; restart the server or use
+**Reset demo** on the employee page to start over.
 
-`SESSION_SECRET` is required in production (min. 32 characters). In development a random
-per-process secret is generated when it is missing.
+`SESSION_SECRET` is required in production (min. 32 characters) — the app refuses to start without it.
+In development a random per-process secret is used when it is missing.
 
-## Demo logins
+## Demo logins and what to try
 
-| Login | Consent | What you should see |
+| Login | Consent | Try this |
 |---|---|---|
-| Benjamin | tailored | "Have you recently moved?" → update home-insurance address + 2 offers |
-| Sarah | basic | "Has your family grown?" → add child to family insurance + 1 offer |
-| Thomas | none | "Are you travelling more often?" → "You're already covered", no sale |
-| Emma | tailored | No life-event question (near-misses only) |
-| KBC employee | – | Detection debug view with all scores (disabled in production) |
+| **Sarah** | basic | Home → "Something may have changed" → *Why am I seeing this?* → **Yes** → "Add your child to your family insurance" → **Confirm change** (2 → 3 people). Only **one** offer, because her consent is basic. Her hospital payment is visible in her transactions but never used as evidence. |
+| **Benjamin** | tailored | Confirm the move → "Update the address on your home insurance" (old → new address) → done. Offers are visible because consent is tailored. |
+| **Thomas** | none | Confirm → **"You're already covered for travel with your card"**. No sale. |
+| **Emma** | tailored | Only ordinary messages. Her one furniture purchase and one flight are not enough. |
+| **KBC employee** | – | 2,000 synthetic customers scanned, precision/recall per life event, threshold slider, *Explain the math* for each demo customer, **Reset demo**. |
 
-## How detection works
+Also try **Settings**: switch between "Only what protects my contracts", "Light suggestions" and
+"Personal proposals" and watch the suggestions change.
 
-`lib/detection` — explainable likelihood-ratio scoring, fully offline (no ML, no LLM):
+## Privacy & legal choices
 
-```
-odds = prior / (1 - prior) × Π LR(strongest present signal per group)
-confidence = odds / (1 + odds)
-```
+- **Synthetic data only.** Counterparties are pseudonymised IDs.
+- **Health data excluded:** hospital and pharmacy payments are filtered out *before* any signal is
+  computed (unit-tested).
+- **Consent tiers** decide whether offers are shown at all; service actions that protect an existing
+  contract are always allowed.
+- **Asks before acting:** no contract changes without an explicit tap by the customer.
+- **No pricing or credit decisions** are made by the engine. Offers are demo placeholders.
+- The customer sees the evidence and can dismiss; a dismissed moment is never asked again.
 
-- Only the last 90 days count (the demo "today" is fixed at `DEMO_TODAY` in `config.ts`).
-- Correlated signals share a group; only the strongest per group counts.
-- `sensitiveFilter.ts` removes `hospital` / `pharmacy` transactions **before** signal extraction.
-- ≥ 0.85 → direct question, 0.50–0.85 → softer question, < 0.50 → nothing.
-- All priors, LRs and thresholds live in `lib/detection/config.ts` (team estimates).
-  Frequent-traveller LRs were tuned from 6/3/3 to 8/5/4 to reach the 0.85 target.
+## Security
 
-Current scores: Benjamin moved_house 0.998 · Sarah new_baby 0.973 · Thomas frequent_traveller 0.894 ·
-Emma max 0.039.
+Built to be audited (Aikido) for IDOR, authentication, authorization and business-logic flaws:
+
+- **Session-based access:** HMAC-SHA256 signed cookie (`httpOnly`, `sameSite=lax`, `secure` in
+  production, 8 h expiry). The customer is *always* taken from the session — no endpoint accepts a
+  customer id (only the demo login itself).
+- **Ownership checks in the data layer:** another customer's event, notification or action returns
+  **404**. Only `detected → confirmed | dismissed` is allowed (409 otherwise). Actions can only be
+  completed for recommendations currently offered for the customer's *confirmed* event, and only once.
+- **Roles:** employee routes require the employee role. Debug routes (`/api/debug/*`) and the
+  employee login are disabled when `NODE_ENV=production`.
+- **Input validation:** zod on every body, param and query; generic error messages, no stack traces.
+- **CSRF defence:** `sameSite=lax` plus an `Origin` check on every state-changing request.
+- **Headers:** CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`.
+- No secrets in the repo; `.env*.local` is git-ignored.
+- Security behaviour is covered by route-level tests in `tests/security.test.ts`.
+
+## Scale
+
+The challenge asks how this scales to 2.3 million customers. The employee dashboard runs the same
+engine over **2,000 synthetic customers** (seeded PRNG, planted life events with only *partial*
+evidence, plus near-misses such as a holiday abroad or helping a friend move) and measures
+**precision and recall** against the planted ground truth. A full scan takes a few hundred ms in
+development on a laptop, i.e. linear, stateless scoring per customer that parallelises trivially.
+The threshold slider shows the trade-off: at 0.5 roughly 83% precision / 83% recall overall; at
+0.65 precision reaches 100% while recall drops to ~70%.
 
 ## API
 
-All endpoints derive the customer from the signed session cookie. No endpoint accepts a customer
-id except the demo login.
-
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/session` | who is logged in |
-| POST | `/api/session` | body `{ customerId }` — demo login (only allowed ids) |
-| DELETE | `/api/session` | logout |
-| GET | `/api/me/customer` | |
-| GET | `/api/me/accounts` | |
-| GET | `/api/me/transactions?limit=20` | limit 1–200 |
-| GET | `/api/me/notifications` | |
-| POST | `/api/notifications/:id/read` | 404 if not yours |
-| GET | `/api/me/events` | |
-| POST | `/api/events/:eventId/confirm` | 404 if not yours, 409 if not `detected` |
-| POST | `/api/events/:eventId/dismiss` | 404 if not yours, 409 if not `detected` |
+| POST / DELETE / GET | `/api/session` | demo login (`{ customerId }`), logout, who am I |
+| GET | `/api/me/customer`, `/accounts`, `/transactions?limit=`, `/policies`, `/notifications`, `/events` | session customer only |
+| PATCH | `/api/me/consent` | `{ marketing?, proactivityLevel? }` |
+| POST | `/api/events/:eventId/confirm` · `/dismiss` | 404 if not yours, 409 if not `detected` |
 | GET | `/api/me/recommendations` | confirmed events only, consent-filtered |
-| GET | `/api/debug/events` | employee session only; 404 in production |
+| POST | `/api/me/actions/:recommendationId` | body `{}`; 404 if not offered to you, 409 if already done |
+| POST | `/api/notifications/:id/read` | 404 if not yours |
+| GET | `/api/employee/overview?threshold=` | employee only |
+| GET | `/api/debug/events[?customer=]` | employee only, dev only |
+| POST | `/api/debug/reset` | employee only, dev only |
 
-The frontend only talks to the API through `lib/client/api.ts`.
-
-## Security notes
-
-- Session cookie: HMAC-SHA256 signed, `httpOnly`, `sameSite=lax`, `secure` in production, 8h expiry.
-- Ownership is enforced in the data layer (`lib/data/store.ts`), not only in routes.
-- State-changing requests reject a cross-site `Origin` header.
-- All input validated with zod; errors are generic.
-- The employee login and debug endpoint/page are disabled when `NODE_ENV=production`.
-- No secrets in the repo; `.env*.local` is git-ignored.
-
-## Project layout / ownership
+## Project layout
 
 ```
-app/login, app/(app)/{dashboard,accounts,transactions}   Person 2 (+ components/ layout & nav)
-app/(app)/{notifications,recommendations,apply/[id]}      Person 3
-app/api, lib/{data,detection,recommendations,auth,api}    Person 1
-lib/types.ts                                              SHARED CONTRACT — change only after team agreement
-lib/client/api.ts                                         the only place the frontend calls the API
-app/employee                                              employee debug view (dev only)
+app/(app)/            customer app: dashboard, accounts, transactions, settings,
+                      notifications, recommendations, apply/[id]
+app/employee/         KBC-side dashboard
+app/api/              route handlers (thin: auth + validation, then lib/)
+lib/types.ts          shared contract
+lib/data/             mock data, in-memory store, synthetic population
+lib/detection/        config, sensitive filter, signals, detector, overview
+lib/recommendations/  catalogue + consent filter
+lib/auth/             signed session, guards
+lib/client/api.ts     the only place the frontend calls the API
+components/ui/        shared UI kit · components/life/ life-moment components
+tests/                vitest: detection, recommendations, security
 ```
 
 ## Unfinished / next steps
 
-- Screens are working placeholders — Person 2/3 to design them properly.
-- Apply screen is fake (nothing is submitted).
-- No persistence: confirm/dismiss state resets on restart.
-- Optional: friendlier message wording via Gemini behind an env variable, with the templates in
-  `lib/detection/messages.ts` as fallback.
-- Muted topics and a "low" proactivity level are respected by the detector, but there is no UI to
-  change consent settings yet.
+- Friendlier, multilingual question wording via an LLM (only event type + evidence descriptions sent,
+  template fallback, never allowed to change the score) — not built.
+- Persistence: state is in memory and resets on restart.
+- Employee access in production would need real staff authentication (SSO); the demo employee
+  login is dev-only.
+- Offers are placeholders; a real rollout needs product, pricing and compliance review.
+- Likelihood ratios are team estimates; with real (consented) data they should be calibrated.

@@ -4,8 +4,13 @@
 
 import type {
   Account,
+  ActionResult,
+  ConsentUpdate,
   Customer,
   DebugCustomerReport,
+  EmployeeOverview,
+  InsurancePolicy,
+  MathExplanation,
   LifeEvent,
   Notification,
   RecommendationGroup,
@@ -62,6 +67,18 @@ export const dismissEvent = (eventId: string) =>
 
 // --- recommendations (only for confirmed events, consent-filtered server-side) ---
 export const getRecommendations = () => request<RecommendationGroup[]>("/api/me/recommendations");
+export const completeAction = (recommendationId: string) =>
+  request<ActionResult>(`/api/me/actions/${seg(recommendationId)}`, { method: "POST", body: "{}" });
 
-// --- employee debug (dev only) ---
+// --- contracts & consent ---
+export const getPolicies = () => request<InsurancePolicy[]>("/api/me/policies");
+export const updateConsent = (update: ConsentUpdate) =>
+  request<Customer>("/api/me/consent", { method: "PATCH", body: JSON.stringify(update) });
+
+// --- employee ---
+export const getEmployeeOverview = (threshold = 0.5) =>
+  request<EmployeeOverview>(`/api/employee/overview?threshold=${encodeURIComponent(threshold.toFixed(2))}`);
 export const getDebugEvents = () => request<DebugCustomerReport[]>("/api/debug/events");
+export const explainMath = (demoCustomerId: string) =>
+  request<MathExplanation>(`/api/debug/events?customer=${encodeURIComponent(demoCustomerId)}`);
+export const resetDemo = () => request<{ ok: true }>("/api/debug/reset", { method: "POST" });

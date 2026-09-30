@@ -1,18 +1,20 @@
 "use client";
 
+import { ArrowLeftRight, Bell, House, Settings, Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getNotifications } from "@/lib/client/api";
 
-/** Fire this after changing notification state so the badge refreshes. */
+/** Dispatch this window event after changing notification state so the badge refreshes. */
 export const NOTIFICATIONS_CHANGED = "notifications-changed";
 
 const ITEMS = [
-  { href: "/dashboard", label: "Home", icon: "⌂" },
-  { href: "/accounts", label: "Accounts", icon: "▤" },
-  { href: "/transactions", label: "Transactions", icon: "⇄" },
-  { href: "/notifications", label: "Notifications", icon: "🔔" },
+  { href: "/dashboard", label: "Home", icon: House },
+  { href: "/accounts", label: "Accounts", icon: Wallet },
+  { href: "/transactions", label: "Payments", icon: ArrowLeftRight },
+  { href: "/notifications", label: "Inbox", icon: Bell },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
@@ -30,23 +32,28 @@ export function BottomNav() {
   }, [pathname]);
 
   return (
-    <nav className="sticky bottom-0 z-10 grid grid-cols-4 border-t border-line bg-surface/95 backdrop-blur">
-      {ITEMS.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(item.href + "/");
+    <nav className="sticky bottom-0 z-20 grid grid-cols-5 border-t border-line bg-surface/95 pb-1 backdrop-blur">
+      {ITEMS.map(({ href, label, icon: Icon }) => {
+        const active =
+          pathname === href ||
+          pathname.startsWith(href + "/") ||
+          (href === "/notifications" && (pathname.startsWith("/recommendations") || pathname.startsWith("/apply")));
         return (
           <Link
-            key={item.href}
-            href={item.href}
-            className={`relative flex flex-col items-center gap-0.5 py-2.5 text-[11px] ${
-              active ? "font-semibold text-brand" : "text-muted"
+            key={href}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className={`relative flex flex-col items-center gap-1 py-2.5 text-[11px] transition-colors ${
+              active ? "font-semibold text-brand" : "text-muted hover:text-ink"
             }`}
           >
-            <span className="text-lg leading-none" aria-hidden>
-              {item.icon}
-            </span>
-            {item.label}
-            {item.href === "/notifications" && unread > 0 && (
-              <span className="absolute right-[22%] top-1.5 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-semibold leading-4 text-white">
+            <Icon size={21} strokeWidth={active ? 2.4 : 2} aria-hidden />
+            {label}
+            {href === "/notifications" && unread > 0 && (
+              <span
+                aria-label={`${unread} unread`}
+                className="absolute left-1/2 top-1.5 ml-1.5 min-w-[18px] rounded-full bg-brand px-1 text-center text-[10px] font-bold leading-[18px] text-white ring-2 ring-surface"
+              >
                 {unread}
               </span>
             )}

@@ -7,6 +7,7 @@ const Params = z.object({ eventId: z.uuid() });
 /**
  * Shared confirm/dismiss handler. The customer comes from the session; an event
  * that does not belong to that customer is indistinguishable from a missing one (404).
+ * Only "detected" events can change state (409 otherwise).
  */
 export async function handleEventStatus(
   req: Request,
@@ -22,5 +23,5 @@ export async function handleEventStatus(
 
   const result = setEventStatus(auth.customerId, parsed.data.eventId, status);
   if (!result.ok) return jsonError(result.reason === "not_found" ? 404 : 409);
-  return noStore(result.event);
+  return noStore(result.value);
 }

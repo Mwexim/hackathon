@@ -90,7 +90,7 @@ export const CATALOGUE: CatalogueEntry[] = [
     title: "You're already covered for travel with your card",
     description: "Your credit card includes travel insurance. No need to buy extra cover — here's what it includes.",
     icon: "✈️",
-    actionLabel: "See what's covered",
+    actionLabel: "View my cover",
     eligible: hasTravelCover,
   },
   {
